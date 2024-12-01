@@ -1,0 +1,16 @@
+{
+    "MarketFilter": {
+        "SOLMYR": {
+			"Enabled": true,
+			"MaxPriceDiff": 10
+		}
+	},
+	"Luno": {
+		"ApiKey": "xxx",
+		"ApiSecret": "xxx"
+	},
+	"Hata": {
+		"ApiKey": "xxx",
+		"ApiSecret": "xxx"
+	}
+}

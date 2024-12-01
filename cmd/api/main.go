@@ -4,7 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"malaysia-crypto-exchange-arbitrage/internal/arbitrage"
+	"malaysia-crypto-exchange-arbitrage/internal/config"
+	"malaysia-crypto-exchange-arbitrage/internal/exchange/hata"
+	"malaysia-crypto-exchange-arbitrage/internal/exchange/luno"
 	"malaysia-crypto-exchange-arbitrage/internal/server"
+	logger "malaysia-crypto-exchange-arbitrage/internal/utils"
 	"os"
 	"os/signal"
 	"strconv"
@@ -40,25 +45,57 @@ func gracefulShutdown(fiberServer *server.FiberServer, done chan bool) {
 
 func main() {
 
-	server := server.New()
+	debug := true
+	if debug {
+		// ctx, cancel := context.WithCancel(context.Background())
 
-	server.RegisterFiberRoutes()
+		config := config.GetConfig()
+		logger.Get().Info("Current config is: " + fmt.Sprintf("%v", config))
 
-	// Create a done channel to signal when the shutdown is complete
-	done := make(chan bool, 1)
+		ex := luno.CreateClient(config.Luno.ApiKey, config.Luno.ApiSecret)
+		lunoOutput, _ := ex.TestClient()
+		// ex.SubscribeSocket(ctx, "SOLMYR")
 
-	go func() {
-		port, _ := strconv.Atoi(os.Getenv("PORT"))
-		err := server.Listen(fmt.Sprintf(":%d", port))
-		if err != nil {
-			panic(fmt.Sprintf("http server error: %s", err))
+		ex2 := hata.CreateClient(config.Hata.ApiKey, config.Hata.ApiSecret)
+		hataOutput, _ := ex2.TestClient()
+
+		log.Println(lunoOutput)
+		log.Println(hataOutput)
+
+		arbitrageOutput, _ := arbitrage.Analyze(lunoOutput, hataOutput)
+		log.Println(arbitrageOutput)
+
+		// Set up a channel to handle system interrupts (Ctrl+C)
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+		// Block until an interrupt signal is received
+		select {
+		case <-interrupt:
+			// cancel()
+			fmt.Println("Interrupt signal received. Shutting down...")
 		}
-	}()
+	} else {
+		server := server.New()
 
-	// Run graceful shutdown in a separate goroutine
-	go gracefulShutdown(server, done)
+		server.RegisterFiberRoutes()
 
-	// Wait for the graceful shutdown to complete
-	<-done
-	log.Println("Graceful shutdown complete.")
+		// Create a done channel to signal when the shutdown is complete
+		done := make(chan bool, 1)
+
+		go func() {
+			port, _ := strconv.Atoi(os.Getenv("PORT"))
+			err := server.Listen(fmt.Sprintf(":%d", port))
+			if err != nil {
+				panic(fmt.Sprintf("http server error: %s", err))
+			}
+		}()
+
+		// Run graceful shutdown in a separate goroutine
+		go gracefulShutdown(server, done)
+
+		// Wait for the graceful shutdown to complete
+		<-done
+		log.Println("Graceful shutdown complete.")
+	}
 }
