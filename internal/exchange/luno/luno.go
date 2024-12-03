@@ -3,18 +3,19 @@ package luno
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
-	"malaysia-crypto-exchange-arbitrage/internal/config"
-	exchange "malaysia-crypto-exchange-arbitrage/internal/exchange"
-	orderbook "malaysia-crypto-exchange-arbitrage/internal/orderbook"
-	logger "malaysia-crypto-exchange-arbitrage/internal/utils"
+	"malaysia-crypto-exchange-arbitrage/internal/domain"
+	"malaysia-crypto-exchange-arbitrage/internal/platform/config"
+	"malaysia-crypto-exchange-arbitrage/internal/platform/logger"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/luno/luno-go"
+	"github.com/luno/luno-go/decimal"
 )
 
 type LunoExchange struct {
@@ -26,7 +27,7 @@ type LunoExchange struct {
 }
 
 type LunoExchangeState struct {
-	exchange.ExchangeState
+	domain.ExchangeState
 	AsksOrderbook   []LunoOrderBookPriceFeed
 	BidsOrderbook   []LunoOrderBookPriceFeed
 	CurrentSequence int
@@ -50,13 +51,27 @@ func CreateClient(id string, secret string) *LunoExchange {
 		apiKeySecret:     secret,
 		states:           make(map[string]*LunoExchangeState),
 	}
-
 }
 
-func (lunoExchange *LunoExchange) TestClient() (output []orderbook.PriceLevel, err error) {
-	req := luno.GetOrderBookRequest{Pair: "SOLMYR"}
+func (lunoExchange *LunoExchange) GetName() string {
+	return domain.Luno.String()
+}
+
+func (lunoExchange *LunoExchange) GetTransferFee(pair string, amount float32) float32 {
+	res, err := lunoExchange.lunoClient.SendFee(context.Background(), &luno.SendFeeRequest{Address: "", Amount: decimal.NewFromFloat64(float64(amount), -8)})
+	if err != nil {
+		Logger.Error("Failed to get Luno transfer fee: " + err.Error())
+		return 0
+	}
+	return float32(res.Fee.Float64())
+}
+
+func (lunoExchange *LunoExchange) GetCurrentOrderBook(pair string) (output domain.OrderBook, err error) {
+	req := luno.GetOrderBookRequest{Pair: pair}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(10*time.Second))
 	defer cancel()
+
+	Logger.Info("Getting Luno order book for pair: " + req.Pair)
 
 	res, err := lunoExchange.lunoClient.GetOrderBook(ctx, &req)
 	if err != nil {
@@ -64,20 +79,29 @@ func (lunoExchange *LunoExchange) TestClient() (output []orderbook.PriceLevel, e
 	}
 	// log.Println(res)
 
-	log.Println(res.Asks[len(res.Asks)-1]) //<-- highest ask price
-	log.Println(res.Asks[0])               //<-- lowest ask price
+	Logger.Info("Highest ask price: " + fmt.Sprintf("%v", res.Asks[len(res.Asks)-1])) //<-- highest ask price
+	Logger.Info("Lowest ask price: " + fmt.Sprintf("%v", res.Asks[0]))                //<-- lowest ask price
 
-	log.Println(res.Bids[len(res.Bids)-1]) //<-- lowest bid price
-	log.Println(res.Bids[0])               //<-- highest bid price
+	Logger.Info("Lowest bid price: " + fmt.Sprintf("%v", res.Bids[len(res.Bids)-1])) //<-- lowest bid price
+	Logger.Info("Highest bid price: " + fmt.Sprintf("%v", res.Bids[0]))              //<-- highest bid price
 
-	output = append(output, orderbook.PriceLevel{
-		Price:  float32(res.Asks[0].Price.Float64()),
-		Volume: float32(res.Asks[0].Volume.Float64()),
-	})
-	output = append(output, orderbook.PriceLevel{
-		Price:  float32(res.Bids[0].Price.Float64()),
-		Volume: float32(res.Bids[0].Volume.Float64()),
-	})
+	output.Pair = pair
+	output.Exchange = domain.Luno
+	output.Asks = make([]domain.PriceLevel, 0)
+	output.Bids = make([]domain.PriceLevel, 0)
+
+	for _, ask := range res.Asks {
+		output.Asks = append(output.Asks, domain.PriceLevel{
+			Price:  float32(ask.Price.Float64()),
+			Volume: float32(ask.Volume.Float64()),
+		})
+	}
+	for _, bid := range res.Bids {
+		output.Bids = append(output.Bids, domain.PriceLevel{
+			Price:  float32(bid.Price.Float64()),
+			Volume: float32(bid.Volume.Float64()),
+		})
+	}
 
 	return output, nil
 }
@@ -113,9 +137,14 @@ func (lunoExchange *LunoExchange) SubscribeSocket(ctx context.Context, pair stri
 				}
 				if messageType == websocket.MessageText {
 					Logger.Info("Received message from Luno websocket. Message: " + string(message))
-					err := lunoExchange.processOrderBookFeed(message, pair)
+					err := lunoExchange.processOrderBookFeed(ctx, message, pair)
 					if err != nil {
-						Logger.Error("Failed to process Luno order book feed: " + err.Error())
+						if errors.As(err, &SequenceIncorrectError{}) {
+							Logger.Error("Sequence number mismatch. Expected: " + fmt.Sprintf("%d", err.(*SequenceIncorrectError).ExpectedSequence) + ", got: " + fmt.Sprintf("%d", err.(*SequenceIncorrectError).ActualSequence))
+							lunoExchange.resubscribeSocket(ctx, c, pair)
+						} else {
+							Logger.Error("Failed to process Luno order book feed: " + err.Error())
+						}
 					}
 				} else {
 					Logger.Error("Received unknown message type from Luno websocket: " + strconv.Itoa(int(messageType)))
@@ -125,6 +154,20 @@ func (lunoExchange *LunoExchange) SubscribeSocket(ctx context.Context, pair stri
 	}()
 
 	return
+}
+
+func (lunoExchange *LunoExchange) resubscribeSocket(ctx context.Context, c *websocket.Conn, pair string) (err error) {
+	Logger.Info("Resubscribing to Luno websocket for pair: " + pair)
+
+	// Close current connection
+	c.Close(websocket.StatusNormalClosure, "")
+
+	// Reset state
+	lunoExchange.states[pair].Mutex.Lock()
+	defer lunoExchange.states[pair].Mutex.Unlock()
+	lunoExchange.states[pair] = nil
+
+	return lunoExchange.SubscribeSocket(ctx, pair)
 }
 
 func (lunoExchange *LunoExchange) sendAuthenticationMessage(ctx context.Context, c *websocket.Conn) error {
@@ -149,11 +192,11 @@ func (lunoExchange *LunoExchange) sendAuthenticationMessage(ctx context.Context,
 	return nil
 }
 
-func (lunoExchange *LunoExchange) processOrderBookFeed(feedString []byte, pair string) error {
+func (lunoExchange *LunoExchange) processOrderBookFeed(ctx context.Context, feedString []byte, pair string) error {
 	config := config.GetConfig()
-	maxPriceDiff := config.MarketFilter[pair].MaxPriceDiff
+	maxPriceDiff := config.Market[pair].MaxPriceDiff
 
-	if lunoExchange.states[pair] == nil || lunoExchange.states[pair].CurrentSequence == 0 {
+	if lunoExchange.states[pair] == nil {
 		var feedSnapshot *LunoOrderBookFeedSnapshot
 		err := json.Unmarshal(feedString, &feedSnapshot)
 		if err != nil {
@@ -161,9 +204,9 @@ func (lunoExchange *LunoExchange) processOrderBookFeed(feedString []byte, pair s
 		}
 
 		lunoExchange.states[pair] = &LunoExchangeState{
-			ExchangeState: exchange.ExchangeState{
-				OrderBook: &orderbook.OrderBook{Pair: pair},
-				Updates:   make(chan *orderbook.OrderBook),
+			ExchangeState: domain.ExchangeState{
+				OrderBook: &domain.OrderBook{Pair: pair},
+				Updates:   make(chan *domain.OrderBook),
 				Stop:      make(chan bool),
 				Mutex:     sync.Mutex{},
 			},
@@ -191,7 +234,12 @@ func (lunoExchange *LunoExchange) processOrderBookFeed(feedString []byte, pair s
 		lunoExchange.states[pair].Mutex.Lock()
 		defer lunoExchange.states[pair].Mutex.Unlock()
 
-		err := lunoExchange.processFeedUpdate(feedMessage, pair, maxPriceDiff)
+		err := lunoExchange.ProcessSequenceNumber(pair, feedMessage.Sequence)
+		if err != nil {
+			return err
+		}
+
+		err = lunoExchange.processFeedUpdate(feedMessage, pair, maxPriceDiff)
 		StateLogger.Info("Current internal state for pair: " + pair + " is: " + fmt.Sprintf("%v", lunoExchange.states[pair]))
 		if err != nil {
 			return err
@@ -203,14 +251,14 @@ func (lunoExchange *LunoExchange) processOrderBookFeed(feedString []byte, pair s
 
 func (lunoExchange *LunoExchange) processFeedSnapshot(feedSnapshot *LunoOrderBookFeedSnapshot, pair string, maxPriceDiff float32) error {
 	// Process asks
-	asks := make([]orderbook.PriceLevel, 0)
+	asks := make([]domain.PriceLevel, 0)
 	StateLogger.Info("Feed snapshot for pair: " + pair + " is: " + fmt.Sprintf("%v", feedSnapshot))
 	lowestAskPrice := feedSnapshot.Asks[0].Price // First ask is lowest
 	for _, ask := range feedSnapshot.Asks {
 		// Only include asks within maxPriceDiff of lowest ask
 		priceDiff := (ask.Price - lowestAskPrice) / lowestAskPrice
 		if priceDiff <= maxPriceDiff {
-			asks = append(asks, orderbook.PriceLevel{
+			asks = append(asks, domain.PriceLevel{
 				Price:  ask.Price,
 				Volume: ask.Volume,
 			})
@@ -219,13 +267,13 @@ func (lunoExchange *LunoExchange) processFeedSnapshot(feedSnapshot *LunoOrderBoo
 	}
 
 	// Process bids
-	bids := make([]orderbook.PriceLevel, 0)
+	bids := make([]domain.PriceLevel, 0)
 	highestBidPrice := feedSnapshot.Bids[0].Price // First bid is highest
 	for _, bid := range feedSnapshot.Bids {
 		// Only include bids within maxPriceDiff of highest bid
 		priceDiff := (highestBidPrice - bid.Price) / highestBidPrice
 		if priceDiff <= maxPriceDiff {
-			bids = append(bids, orderbook.PriceLevel{
+			bids = append(bids, domain.PriceLevel{
 				Price:  bid.Price,
 				Volume: bid.Volume,
 			})
@@ -233,7 +281,7 @@ func (lunoExchange *LunoExchange) processFeedSnapshot(feedSnapshot *LunoOrderBoo
 		}
 	}
 
-	lunoExchange.states[pair].OrderBook = &orderbook.OrderBook{
+	lunoExchange.states[pair].OrderBook = &domain.OrderBook{
 		Pair: pair,
 		Asks: asks,
 		Bids: bids,
@@ -307,7 +355,7 @@ func (lunoExchange *LunoExchange) processFeedUpdate(feedMessage *LunoOrderBookFe
 			Volume: feedMessage.CreateUpdate.Volume,
 		}
 
-		newPriceLevel := orderbook.PriceLevel{
+		newPriceLevel := domain.PriceLevel{
 			Price:  feedMessage.CreateUpdate.Price,
 			Volume: feedMessage.CreateUpdate.Volume,
 		}
@@ -371,6 +419,20 @@ func (lunoExchange *LunoExchange) processFeedUpdate(feedMessage *LunoOrderBookFe
 	select {
 	case lunoExchange.states[pair].Updates <- lunoExchange.states[pair].OrderBook:
 	default:
+	}
+
+	return nil
+}
+
+func (lunoExchange *LunoExchange) ProcessSequenceNumber(pair string, sequence int) error {
+	previousSequence := lunoExchange.states[pair].CurrentSequence
+	if sequence == previousSequence+1 {
+		lunoExchange.states[pair].CurrentSequence = sequence
+	} else {
+		return &SequenceIncorrectError{
+			ExpectedSequence: previousSequence + 1,
+			ActualSequence:   sequence,
+		}
 	}
 
 	return nil

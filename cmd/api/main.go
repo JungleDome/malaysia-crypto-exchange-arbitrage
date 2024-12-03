@@ -6,10 +6,10 @@ import (
 	"log"
 	"malaysia-crypto-exchange-arbitrage/internal/arbitrage"
 	"malaysia-crypto-exchange-arbitrage/internal/config"
+	"malaysia-crypto-exchange-arbitrage/internal/domain"
 	"malaysia-crypto-exchange-arbitrage/internal/exchange/hata"
 	"malaysia-crypto-exchange-arbitrage/internal/exchange/luno"
 	"malaysia-crypto-exchange-arbitrage/internal/server"
-	logger "malaysia-crypto-exchange-arbitrage/internal/utils"
 	"os"
 	"os/signal"
 	"strconv"
@@ -47,23 +47,32 @@ func main() {
 
 	debug := true
 	if debug {
-		// ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background())
 
 		config := config.GetConfig()
-		logger.Get().Info("Current config is: " + fmt.Sprintf("%v", config))
 
-		ex := luno.CreateClient(config.Luno.ApiKey, config.Luno.ApiSecret)
-		lunoOutput, _ := ex.TestClient()
-		// ex.SubscribeSocket(ctx, "SOLMYR")
+		exchanges := []domain.Exchanger{}
 
-		ex2 := hata.CreateClient(config.Hata.ApiKey, config.Hata.ApiSecret)
-		hataOutput, _ := ex2.TestClient()
+		var ex domain.Exchanger = luno.CreateClient(config.Exchange["Luno"].ApiKey, config.Exchange["Luno"].ApiSecret)
+		exchanges = append(exchanges, ex)
+		var ex2 domain.Exchanger = hata.CreateClient(config.Exchange["Hata"].ApiKey, config.Exchange["Hata"].ApiSecret)
+		exchanges = append(exchanges, ex2)
 
-		log.Println(lunoOutput)
-		log.Println(hataOutput)
+		pairs := make([]string, 0)
+		for pair := range config.Market {
+			if config.Market[pair].Enabled {
+				pairs = append(pairs, pair)
+			}
+		}
 
-		arbitrageOutput, _ := arbitrage.Analyze(lunoOutput, hataOutput)
-		log.Println(arbitrageOutput)
+		watcher := arbitrage.NewArbitrageScheduledWatcher(ctx, exchanges, pairs, 30*time.Second, domain.Scheduled)
+		watcher.Start()
+
+		// for pair := range config.Market {
+		// 	if config.Market[pair].Enabled {
+		// 		go arbitrage.StartWatching(ctx, pair, []domain.Exchanger{ex, ex2}, 30*time.Second)
+		// 	}
+		// }
 
 		// Set up a channel to handle system interrupts (Ctrl+C)
 		interrupt := make(chan os.Signal, 1)
@@ -72,7 +81,7 @@ func main() {
 		// Block until an interrupt signal is received
 		select {
 		case <-interrupt:
-			// cancel()
+			cancel()
 			fmt.Println("Interrupt signal received. Shutting down...")
 		}
 	} else {

@@ -1,16 +1,65 @@
 {
-    "MarketFilter": {
+    "Market": {
         "SOLMYR": {
+			"Enabled": true,
+			"MaxPriceDiff": 10
+		},
+		"XLMMYR": {
+			"Enabled": true,
+			"MaxPriceDiff": 10
+		},
+		"AVAXMYR": {
 			"Enabled": true,
 			"MaxPriceDiff": 10
 		}
 	},
-	"Luno": {
-		"ApiKey": "xxx",
-		"ApiSecret": "xxx"
+	"Arbitrage": {
+		"SOLMYR": {
+			"MinProfit": 1,
+			"SlippageMode": 1,
+			"Slippage": 0.005
+		},
+		"XLMMYR": {
+			"MinProfit": 1,
+			"SlippageMode": 0,
+			"Slippage": 0.1
+		},
+		"AVAXMYR": {
+			"MinProfit": 1,
+			"SlippageMode": 0,
+			"Slippage": 5
+		}
 	},
-	"Hata": {
-		"ApiKey": "xxx",
-		"ApiSecret": "xxx"
+	"Exchange": {
+		"Luno": {
+			"Enabled": true,
+			"ApiKey": "xxx",
+			"ApiSecret": "xxx",
+			"MakerFee": 0.0035,
+			"TakerFee": 0.006,
+			"CryptoTransferFee": {
+				"SOLMYR": 0.00
+			}
+		},
+		"Hata": {
+			"Enabled": true,
+			"ApiKey": "xxx",
+			"ApiSecret": "xxx",
+			"MakerFee": 0,
+			"TakerFee": 0.004,
+			"CryptoTransferFee": {
+				"SOLMYR": 0.00
+			}
+		},
+		"MXGlobal": {
+			"Enabled": true,
+			"ApiKey": "1234567890",
+			"ApiSecret": "1234567890",
+			"MakerFee": 0,
+			"TakerFee": 0.005,
+			"CryptoTransferFee": {
+				"SOLMYR": 0.01
+			}
+		}
 	}
 }

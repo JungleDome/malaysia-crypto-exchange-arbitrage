@@ -1,5 +1,16 @@
 package luno
 
+import "fmt"
+
+type SequenceIncorrectError struct {
+	ExpectedSequence int
+	ActualSequence   int
+}
+
+func (e *SequenceIncorrectError) Error() string {
+	return fmt.Sprintf("sequence number mismatch. Expected: %d, got: %d", e.ExpectedSequence, e.ActualSequence)
+}
+
 type LunoWebsocketAuthenticationRequest struct {
 	ApiKeyId     string `json:"api_key_id"`
 	ApiKeySecret string `json:"api_key_secret"`

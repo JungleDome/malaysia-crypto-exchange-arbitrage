@@ -14,6 +14,7 @@ import (
 var once sync.Once
 var appLogger *zap.Logger
 var stateLogger *zap.Logger
+var arbitrageLogger *zap.Logger
 
 type Config struct {
 	Filename   string
@@ -33,6 +34,11 @@ func Get() *zap.Logger {
 func GetStateLogger() *zap.Logger {
 	once.Do(initLoggers)
 	return stateLogger
+}
+
+func GetArbitrageLogger() *zap.Logger {
+	once.Do(initLoggers)
+	return arbitrageLogger
 }
 
 func newLogger(config Config, useConsole bool) (*zap.Logger, error) {
@@ -58,9 +64,11 @@ func newLogger(config Config, useConsole bool) (*zap.Logger, error) {
 	productionCfg := zap.NewProductionEncoderConfig()
 	productionCfg.TimeKey = "timestamp"
 	productionCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	productionCfg.EncodeCaller = zapcore.ShortCallerEncoder
 
 	developmentCfg := zap.NewDevelopmentEncoderConfig()
 	developmentCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	developmentCfg.EncodeCaller = zapcore.ShortCallerEncoder
 
 	consoleEncoder := zapcore.NewConsoleEncoder(developmentCfg)
 	fileEncoder := zapcore.NewJSONEncoder(productionCfg)
@@ -71,7 +79,7 @@ func newLogger(config Config, useConsole bool) (*zap.Logger, error) {
 	}
 	cores = append(cores, zapcore.NewCore(fileEncoder, zapcore.AddSync(fileHandler), logLevel))
 
-	return zap.New(zapcore.NewTee(cores...)), nil
+	return zap.New(zapcore.NewTee(cores...), zap.AddCaller()), nil
 }
 
 func initLoggers() {
@@ -91,6 +99,14 @@ func initLoggers() {
 		Compress:   true,
 	}
 
+	arbitrageConfig := Config{
+		Filename:   "logs/arbitrage.log",
+		MaxSize:    5,
+		MaxBackups: 10,
+		MaxAge:     14,
+		Compress:   true,
+	}
+
 	var err error
 	appLogger, err = newLogger(appConfig, true) // with console output
 	if err != nil {
@@ -100,5 +116,10 @@ func initLoggers() {
 	stateLogger, err = newLogger(stateConfig, false) // without console output
 	if err != nil {
 		log.Fatalf("failed to create state logger: %v", err)
+	}
+
+	arbitrageLogger, err = newLogger(arbitrageConfig, true) // with console output
+	if err != nil {
+		log.Fatalf("failed to create arbitrage logger: %v", err)
 	}
 }

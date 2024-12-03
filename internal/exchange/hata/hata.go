@@ -8,9 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	exchange "malaysia-crypto-exchange-arbitrage/internal/exchange"
-	orderbook "malaysia-crypto-exchange-arbitrage/internal/orderbook"
-	logger "malaysia-crypto-exchange-arbitrage/internal/utils"
+	"malaysia-crypto-exchange-arbitrage/internal/domain"
+	"malaysia-crypto-exchange-arbitrage/internal/platform/logger"
 	"net/http"
 	"net/url"
 	"slices"
@@ -23,7 +22,7 @@ type HataExchange struct {
 	websocketBaseUrl string
 	apiKeyId         string
 	apiKeySecret     string
-	state            exchange.ExchangeState
+	state            domain.ExchangeState
 }
 
 type HataOrderBookPriceFeed struct {
@@ -55,16 +54,18 @@ func CreateClient(id string, secret string) *HataExchange {
 	return &exchange
 }
 
-func (exchange *HataExchange) TestClient() (output []orderbook.PriceLevel, err error) {
+func (exchange *HataExchange) GetName() string {
+	return domain.Hata.String()
+}
+
+func (exchange *HataExchange) GetCurrentOrderBook(pair string) (output domain.OrderBook, err error) {
 	params := url.Values{}
-	params.Set("pair_name", "SOLMYR")
+	params.Set("pair_name", pair)
 	queryString := params.Encode()
 
 	hmac := hmac.New(sha256.New, []byte(exchange.apiKeySecret))
 	hmac.Write([]byte(queryString))
 	signature := hex.EncodeToString(hmac.Sum(nil))
-
-	Logger.Info("Signature: " + signature)
 
 	req, err := http.NewRequestWithContext(context.Background(), "GET", exchange.apiBaseUrl+"/orderbook/api/orderbook?"+queryString, nil)
 	if err != nil {
@@ -73,6 +74,8 @@ func (exchange *HataExchange) TestClient() (output []orderbook.PriceLevel, err e
 	}
 	req.Header.Set("X-API-Key", exchange.apiKeyId)
 	req.Header.Set("Signature", signature)
+
+	Logger.Info("Getting Hata order book for pair: " + pair)
 
 	client := http.Client{}
 	resp, err := client.Do(req)
@@ -110,25 +113,34 @@ func (exchange *HataExchange) TestClient() (output []orderbook.PriceLevel, err e
 		return int(b.Price) - int(a.Price)
 	})
 
-	Logger.Info("Hata asks: " + fmt.Sprintf("%v", asks[len(asks)-1])) //<-- highest ask price
-	Logger.Info("Hata asks: " + fmt.Sprintf("%v", asks[0]))           //<-- lowest ask price
+	Logger.Info("Highest ask price: " + fmt.Sprintf("%v", asks[len(asks)-1])) //<-- highest ask price
+	Logger.Info("Lowest ask price: " + fmt.Sprintf("%v", asks[0]))            //<-- lowest ask price
 
-	Logger.Info("Hata bids: " + fmt.Sprintf("%v", bids[len(bids)-1])) //<-- lowest bid price
-	Logger.Info("Hata bids: " + fmt.Sprintf("%v", bids[0]))           //<-- highest bid price
+	Logger.Info("Lowest bid price: " + fmt.Sprintf("%v", bids[len(bids)-1])) //<-- lowest bid price
+	Logger.Info("Highest bid price: " + fmt.Sprintf("%v", bids[0]))          //<-- highest bid price
 
-	output = append(output, orderbook.PriceLevel{
-		Price:  asks[0].Price,
-		Volume: asks[0].Volume,
-	})
-	output = append(output, orderbook.PriceLevel{
-		Price:  bids[0].Price,
-		Volume: bids[0].Volume,
-	})
+	output.Pair = pair
+	output.Exchange = domain.Hata
+	output.Asks = make([]domain.PriceLevel, 0)
+	output.Bids = make([]domain.PriceLevel, 0)
+
+	for _, ask := range asks {
+		output.Asks = append(output.Asks, domain.PriceLevel{
+			Price:  ask.Price,
+			Volume: ask.Volume,
+		})
+	}
+	for _, bid := range bids {
+		output.Bids = append(output.Bids, domain.PriceLevel{
+			Price:  bid.Price,
+			Volume: bid.Volume,
+		})
+	}
 
 	return output, nil
 }
 
-func (exchange *HataExchange) SubscribeSocket(ctx context.Context) (err error) {
+func (exchange *HataExchange) SubscribeSocket(ctx context.Context, pair string) (err error) {
 	// Create message channel and store it in the exchange struct
 
 	c, _, err := websocket.Dial(ctx, exchange.websocketBaseUrl, nil)
