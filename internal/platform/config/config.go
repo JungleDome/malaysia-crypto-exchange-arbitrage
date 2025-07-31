@@ -20,12 +20,22 @@ type Config struct {
 	}
 
 	Exchange map[string]struct {
-		Enabled           bool
-		ApiKey            string
-		ApiSecret         string
-		MakerFee          float32
-		TakerFee          float32
-		CryptoTransferFee map[string]float32
+		Enabled   bool
+		ApiKey    string
+		ApiSecret string
+		MakerFee  float32
+		TakerFee  float32
+		Crypto    map[string]struct {
+			Address           string
+			Memo              string
+			WithdrawFee       float32
+			WithdrawMinAmount float32
+			DepositMinAmount  float32
+		}
+	}
+
+	Discord struct {
+		WebhookUrl string
 	}
 }
 

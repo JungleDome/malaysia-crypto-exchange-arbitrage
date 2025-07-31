@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"malaysia-crypto-exchange-arbitrage/internal/domain"
 	"malaysia-crypto-exchange-arbitrage/internal/platform/config"
 	"malaysia-crypto-exchange-arbitrage/internal/platform/logger"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +37,7 @@ const lunoWebsocketBaseUrl = "wss://ws.luno.com/api/1/stream/"
 
 var Logger = logger.Get()
 var StateLogger = logger.GetStateLogger()
+var ScrapingLogger = logger.GetScrapingLogger()
 
 func CreateClient(id string, secret string) *LunoExchange {
 	lunoClient := luno.NewClient()
@@ -57,13 +58,34 @@ func (lunoExchange *LunoExchange) GetName() string {
 	return domain.Luno.String()
 }
 
-func (lunoExchange *LunoExchange) GetTransferFee(pair string, amount float32) float32 {
-	res, err := lunoExchange.lunoClient.SendFee(context.Background(), &luno.SendFeeRequest{Address: "", Amount: decimal.NewFromFloat64(float64(amount), -8)})
+func (lunoExchange *LunoExchange) GetTransferFee(pair string, address string, amount float32) (fee float32, err error) {
+	res, err := lunoExchange.lunoClient.SendFee(context.Background(), &luno.SendFeeRequest{
+		Address:  address,
+		Currency: strings.Replace(pair, "MYR", "", -1),
+		Amount:   decimal.NewFromFloat64(float64(amount), 8),
+	})
 	if err != nil {
 		Logger.Error("Failed to get Luno transfer fee: " + err.Error())
-		return 0
+		return 0, err
 	}
-	return float32(res.Fee.Float64())
+
+	Logger.Info("Luno transfer fee for currency " + res.Currency + " pair: " + pair + " amount: " + fmt.Sprintf("%v", amount) + " is: " + fmt.Sprintf("%v", res.Fee.Float64()))
+	return float32(res.Fee.Float64()), nil
+}
+
+func (lunoExchange *LunoExchange) GetWithdrawMin(pair string) (min float32, err error) {
+	return 0, nil
+}
+
+func (lunoExchange *LunoExchange) GetDepositMin(pair string) (min float32, err error) {
+	return 0, nil
+}
+
+func (lunoExchange *LunoExchange) GetDepositAddress(pair string) (address string, err error) {
+	Config := config.GetConfig()
+	depositAddress := Config.Exchange[domain.Luno.String()].Crypto[pair].Address
+
+	return depositAddress, nil
 }
 
 func (lunoExchange *LunoExchange) GetCurrentOrderBook(pair string) (output domain.OrderBook, err error) {
@@ -75,15 +97,27 @@ func (lunoExchange *LunoExchange) GetCurrentOrderBook(pair string) (output domai
 
 	res, err := lunoExchange.lunoClient.GetOrderBook(ctx, &req)
 	if err != nil {
-		log.Printf("Failed to get Luno order book: %v", err)
+		Logger.Error("Failed to get Luno order book: " + err.Error())
+		return output, err
 	}
-	// log.Println(res)
 
-	Logger.Info("Highest ask price: " + fmt.Sprintf("%v", res.Asks[len(res.Asks)-1])) //<-- highest ask price
-	Logger.Info("Lowest ask price: " + fmt.Sprintf("%v", res.Asks[0]))                //<-- lowest ask price
+	jsonBytes, err := json.Marshal(res)
+	if err != nil {
+		Logger.Error("Failed to marshal Luno response: " + err.Error())
+	} else {
+		ScrapingLogger.Info(string(jsonBytes))
+	}
 
-	Logger.Info("Lowest bid price: " + fmt.Sprintf("%v", res.Bids[len(res.Bids)-1])) //<-- lowest bid price
-	Logger.Info("Highest bid price: " + fmt.Sprintf("%v", res.Bids[0]))              //<-- highest bid price
+	Logger.Info(fmt.Sprintf("[%s] Ask: [{%f %f}] [{%f %f}] => Bid: [{%f %f}] [{%f %f}]", pair,
+		res.Asks[len(res.Asks)-1].Price.Float64(),
+		res.Asks[len(res.Asks)-1].Volume.Float64(),
+		res.Asks[0].Price.Float64(),
+		res.Asks[0].Volume.Float64(),
+		res.Bids[0].Price.Float64(),
+		res.Bids[0].Volume.Float64(),
+		res.Bids[len(res.Bids)-1].Price.Float64(),
+		res.Bids[len(res.Bids)-1].Volume.Float64(),
+	))
 
 	output.Pair = pair
 	output.Exchange = domain.Luno

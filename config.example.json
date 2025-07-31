@@ -1,0 +1,100 @@
+{
+    "Market": {
+        "SOLMYR": {
+			"Enabled": true,
+			"MaxPriceDiff": 10
+		},
+		"XLMMYR": {
+			"Enabled": false,
+			"MaxPriceDiff": 10
+		},
+		"AVAXMYR": {
+			"Enabled": true,
+			"MaxPriceDiff": 10
+		}
+	},
+	"Arbitrage": {
+		"SOLMYR": {
+			"MinProfit": 1,
+			"SlippageMode": 1,
+			"Slippage": 0.005
+		},
+		"XLMMYR": {
+			"MinProfit": 1,
+			"SlippageMode": 0,
+			"Slippage": 0.1
+		},
+		"AVAXMYR": {
+			"MinProfit": 1,
+			"SlippageMode": 0,
+			"Slippage": 3
+		}
+	},
+	"Exchange": {
+		"Luno": {
+			"Enabled": true,
+			"ApiKey": "YOUR_LUNO_APIKEY",
+			"ApiSecret": "YOUR_LUNO_APISECRET",
+			"MakerFee": 0.0035,
+			"TakerFee": 0.006,
+			"Crypto": {
+				"SOLMYR": {
+					"Address": "YOUR_SOL_RECEIVER_ADDRESS",
+					"WithdrawFee": -1,
+					"WithdrawMin": 0,
+					"DepositMin": 0
+				},
+				"AVAXMYR": {
+					"Address": "YOUR_AVAX_RECEIVER_ADDRESS",
+					"WithdrawFee": -1,
+					"WithdrawMin": 0,
+					"DepositMin": 0
+				},
+				"XLMMYR": {
+					"Address": "YOUR_XLM_RECEIVER_ADDRESS",
+					"WithdrawFee": -1,
+					"WithdrawMin": 0,
+					"DepositMin": 0
+				}
+			}
+		},
+		"Hata": {
+			"Enabled": true,
+			"ApiKey": "YOUR_HATA_APIKEY",
+			"ApiSecret": "YOUR_HATA_APISECRET",
+			"MakerFee": 0,
+			"TakerFee": 0.004,
+			"Crypto": {
+				"SOLMYR": {
+					"Address": "YOUR_SOL_RECEIVER_ADDRESS",
+					"WithdrawFee": 0.008,
+					"WithdrawMinAmount": 0.0098,
+					"DepositMinAmount": 0.022
+				},
+				"AVAXMYR": {
+					"Address": "YOUR_AVAX_RECEIVER_ADDRESS",
+					"WithdrawFee": 0.008,
+					"WithdrawMinAmount": 0.0458,
+					"DepositMinAmount": 0.1
+				},
+				"XLMMYR": {
+					"Address": "YOUR_XLM_RECEIVER_ADDRESS",
+					"Memo": "613323077",
+					"WithdrawFee": 0.01,
+					"WithdrawMinAmount": 3.9985,
+					"DepositMinAmount": 9
+				}
+			}
+		},
+		"MXGlobal": {
+			"Enabled": true,
+			"ApiKey": "YOUR_MXGLOBAL_APIKEY",
+			"ApiSecret": "YOUR_MXGLOBAL_APISECRET",
+			"MakerFee": 0,
+			"TakerFee": 0.005
+		}
+	},
+	"Discord": {
+		"WebhookUrl": "YOUR_DISCORD_BOT_WEBHOOK"
+	}
+}

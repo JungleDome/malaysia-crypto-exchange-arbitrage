@@ -51,12 +51,13 @@ func main() {
 
 		config := config.GetConfig()
 
-		exchanges := []domain.Exchanger{}
+		exchanges := make(map[string]domain.Exchanger)
 
-		var ex domain.Exchanger = luno.CreateClient(config.Exchange["Luno"].ApiKey, config.Exchange["Luno"].ApiSecret)
-		exchanges = append(exchanges, ex)
-		var ex2 domain.Exchanger = hata.CreateClient(config.Exchange["Hata"].ApiKey, config.Exchange["Hata"].ApiSecret)
-		exchanges = append(exchanges, ex2)
+		lunoEx := luno.CreateClient(config.Exchange["Luno"].ApiKey, config.Exchange["Luno"].ApiSecret)
+		hataEx := hata.CreateClient(config.Exchange["Hata"].ApiKey, config.Exchange["Hata"].ApiSecret)
+
+		exchanges[lunoEx.GetName()] = lunoEx
+		exchanges[hataEx.GetName()] = hataEx
 
 		pairs := make([]string, 0)
 		for pair := range config.Market {
@@ -64,6 +65,13 @@ func main() {
 				pairs = append(pairs, pair)
 			}
 		}
+
+		// a, _ := lunoEx.GetDepositAddress("AVAXMYR")
+		// fmt.Println(a)
+		// b, _ := hataEx.GetDepositAddress("AVAXMYR")
+		// fmt.Println(b)
+		// fee, _ := lunoEx.GetTransferFee("AVAXMYR", b, 3)
+		// fmt.Println(fee)
 
 		watcher := arbitrage.NewArbitrageScheduledWatcher(ctx, exchanges, pairs, 30*time.Second, domain.Scheduled)
 		watcher.Start()

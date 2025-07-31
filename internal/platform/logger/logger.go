@@ -15,6 +15,7 @@ var once sync.Once
 var appLogger *zap.Logger
 var stateLogger *zap.Logger
 var arbitrageLogger *zap.Logger
+var scrapingLogger *zap.Logger
 
 type Config struct {
 	Filename   string
@@ -39,6 +40,12 @@ func GetStateLogger() *zap.Logger {
 func GetArbitrageLogger() *zap.Logger {
 	once.Do(initLoggers)
 	return arbitrageLogger
+}
+
+// GetScrapingLogger returns the scraping logger
+func GetScrapingLogger() *zap.Logger {
+	once.Do(initLoggers)
+	return scrapingLogger
 }
 
 func newLogger(config Config, useConsole bool) (*zap.Logger, error) {
@@ -107,6 +114,14 @@ func initLoggers() {
 		Compress:   true,
 	}
 
+	scrapingConfig := Config{
+		Filename:   "logs/scraping.log",
+		MaxSize:    5,
+		MaxBackups: 10,
+		MaxAge:     14,
+		Compress:   true,
+	}
+
 	var err error
 	appLogger, err = newLogger(appConfig, true) // with console output
 	if err != nil {
@@ -121,5 +136,10 @@ func initLoggers() {
 	arbitrageLogger, err = newLogger(arbitrageConfig, true) // with console output
 	if err != nil {
 		log.Fatalf("failed to create arbitrage logger: %v", err)
+	}
+
+	scrapingLogger, err = newLogger(scrapingConfig, false) // with console output
+	if err != nil {
+		log.Fatalf("failed to create scraping logger: %v", err)
 	}
 }

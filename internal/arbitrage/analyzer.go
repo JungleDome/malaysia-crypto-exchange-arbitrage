@@ -28,9 +28,14 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 	// Calculate fees
 	firstExchangeTakerFee := Config.Exchange[firstExchangePrice.Exchange.String()].TakerFee
 	secondExchangeTakerFee := Config.Exchange[secondExchangePrice.Exchange.String()].TakerFee
-	pairTransferFee := Config.Exchange[firstExchangePrice.Exchange.String()].CryptoTransferFee[firstExchangePrice.Pair]
+	pairTransferFee := Config.Exchange[firstExchangePrice.Exchange.String()].Crypto[firstExchangePrice.Pair].WithdrawFee //this transfer fee is used for estimating the amount we need to sell, if the transfer fee cannot be determined before the calculation we will deduct it in the next step
 	slippage := Config.Arbitrage[firstExchangePrice.Pair].Slippage
 	slippageMode := Config.Arbitrage[firstExchangePrice.Pair].SlippageMode
+
+	var realPairTransferFee float32 = 0
+	if pairTransferFee != -1 {
+		realPairTransferFee = pairTransferFee
+	}
 
 	// Calculate price differences
 	firstExchangePriceDiff := firstExchangeAskPrice - secondExchangeBidPrice  //1042 - 1039
@@ -39,7 +44,7 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 	// Determine best arbitrage opportunity
 	if secondExchangePriceDiff < 0 {
 		// Second exchange ask is lower than first exchange bid - consider buying on second exchange and selling on first exchange
-		buyOrders, sellOrders, err := generatePotentialLimitOrder(secondExchangePrice, firstExchangePrice, pairTransferFee, slippageMode, slippage)
+		buyOrders, sellOrders, err := generatePotentialLimitOrder(secondExchangePrice, firstExchangePrice, realPairTransferFee, slippageMode, slippage)
 		if err != nil {
 			return nil, err
 		}
@@ -52,9 +57,9 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 			totalBuyVolume += order.Volume
 			totalBuyAmount += order.Price * order.Volume
 		}
-		buyPrice := totalBuyAmount / totalBuyVolume                                   // Average price per unit
-		buyFee := totalBuyAmount * secondExchangeTakerFee                             // Platform fee
-		totalBuyPrice := totalBuyAmount + buyFee + (totalBuyVolume * pairTransferFee) // Total cost including fees
+		buyPrice := totalBuyAmount / totalBuyVolume       // Average price per unit
+		buyFee := totalBuyAmount * secondExchangeTakerFee // Platform fee
+		totalBuyPrice := totalBuyAmount + buyFee          // Total cost including fees
 
 		var totalSellVolume, totalSellAmount float32
 		for _, order := range sellOrders {
@@ -68,22 +73,24 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 		priceDiff := sellPrice - buyPrice // Difference in price per unit
 
 		arbitrageOpportunity := &domain.ArbitrageOpportunity{
-			Pair:           firstExchangePrice.Pair,
-			BuyOn:          secondExchangePrice.Exchange.String(),
-			SellOn:         firstExchangePrice.Exchange.String(),
-			BuyPrice:       buyPrice,
-			BuyVolume:      totalBuyVolume,
-			BuyFee:         buyFee,
-			SellPrice:      sellPrice,
-			SellVolume:     totalSellVolume,
-			SellFee:        sellFee,
-			PriceDiff:      priceDiff,
-			TotalBuyPrice:  totalBuyPrice,
-			TotalSellPrice: totalSellPrice,
-			TransferFee:    pairTransferFee,
-			NetProfit:      totalSellPrice - totalBuyPrice,
-			BuyOrders:      buyOrders,
-			SellOrders:     sellOrders,
+			Pair:                 firstExchangePrice.Pair,
+			BuyOn:                secondExchangePrice.Exchange.String(),
+			SellOn:               firstExchangePrice.Exchange.String(),
+			BuyPrice:             buyPrice,
+			BuyVolume:            totalBuyVolume,
+			BuyFee:               buyFee,
+			SellPrice:            sellPrice,
+			SellVolume:           totalSellVolume,
+			SellFee:              sellFee,
+			PriceDiff:            priceDiff,
+			TotalBuyPrice:        totalBuyPrice,
+			TotalSellPrice:       totalSellPrice,
+			NativeTransferFee:    realPairTransferFee,
+			TransferFee:          realPairTransferFee * buyPrice,
+			NetProfit:            totalSellPrice - totalBuyPrice - realPairTransferFee*buyPrice,
+			BuyOrders:            buyOrders,
+			SellOrders:           sellOrders,
+			IsDynamicTransferFee: pairTransferFee == -1,
 		}
 
 		arbitrageOpportunity.Profitable = arbitrageOpportunity.NetProfit > 0
@@ -94,7 +101,7 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 	}
 	if firstExchangePriceDiff < 0 {
 		// First exchange ask is lower than second exchange bid - consider buying on first exchange and selling on second exchange
-		buyOrders, sellOrders, err := generatePotentialLimitOrder(firstExchangePrice, secondExchangePrice, pairTransferFee, slippageMode, slippage)
+		buyOrders, sellOrders, err := generatePotentialLimitOrder(firstExchangePrice, secondExchangePrice, realPairTransferFee, slippageMode, slippage)
 		if err != nil {
 			return nil, err
 		}
@@ -107,9 +114,9 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 			totalBuyVolume += order.Volume
 			totalBuyAmount += order.Price * order.Volume
 		}
-		buyPrice := totalBuyAmount / totalBuyVolume                                   // Average price per unit
-		buyFee := totalBuyAmount * firstExchangeTakerFee                              // Platform fee
-		totalBuyPrice := totalBuyAmount + buyFee + (totalBuyVolume * pairTransferFee) // Total cost including fees
+		buyPrice := totalBuyAmount / totalBuyVolume      // Average price per unit
+		buyFee := totalBuyAmount * firstExchangeTakerFee // Platform fee
+		totalBuyPrice := totalBuyAmount + buyFee         // Total cost including fees
 
 		var totalSellVolume, totalSellAmount float32
 		for _, order := range sellOrders {
@@ -123,22 +130,24 @@ func analyze(firstExchangePrice domain.OrderBook, secondExchangePrice domain.Ord
 		priceDiff := sellPrice - buyPrice // Difference in price per unit
 
 		arbitrageOpportunity := &domain.ArbitrageOpportunity{
-			Pair:           firstExchangePrice.Pair,
-			BuyOn:          firstExchangePrice.Exchange.String(),
-			SellOn:         secondExchangePrice.Exchange.String(),
-			BuyPrice:       buyPrice,
-			BuyVolume:      totalBuyVolume,
-			BuyFee:         buyFee,
-			SellPrice:      sellPrice,
-			SellVolume:     totalSellVolume,
-			SellFee:        sellFee,
-			PriceDiff:      priceDiff,
-			TotalBuyPrice:  totalBuyPrice,
-			TotalSellPrice: totalSellPrice,
-			TransferFee:    pairTransferFee,
-			NetProfit:      totalSellPrice - totalBuyPrice,
-			BuyOrders:      buyOrders,
-			SellOrders:     sellOrders,
+			Pair:                 firstExchangePrice.Pair,
+			BuyOn:                firstExchangePrice.Exchange.String(),
+			SellOn:               secondExchangePrice.Exchange.String(),
+			BuyPrice:             buyPrice,
+			BuyVolume:            totalBuyVolume,
+			BuyFee:               buyFee,
+			SellPrice:            sellPrice,
+			SellVolume:           totalSellVolume,
+			SellFee:              sellFee,
+			PriceDiff:            priceDiff,
+			TotalBuyPrice:        totalBuyPrice,
+			TotalSellPrice:       totalSellPrice,
+			NativeTransferFee:    realPairTransferFee,
+			TransferFee:          realPairTransferFee * buyPrice,
+			NetProfit:            totalSellPrice - totalBuyPrice - realPairTransferFee*buyPrice,
+			BuyOrders:            buyOrders,
+			SellOrders:           sellOrders,
+			IsDynamicTransferFee: pairTransferFee == -1,
 		}
 
 		arbitrageOpportunity.Profitable = arbitrageOpportunity.NetProfit > 0

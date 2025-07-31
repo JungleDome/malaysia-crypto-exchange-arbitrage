@@ -1,6 +1,7 @@
 package hata
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"malaysia-crypto-exchange-arbitrage/internal/domain"
+	"malaysia-crypto-exchange-arbitrage/internal/platform/config"
 	"malaysia-crypto-exchange-arbitrage/internal/platform/logger"
 	"net/http"
 	"net/url"
@@ -42,6 +44,7 @@ const hataApiBaseUrl = "https://my-api.hata.io"
 const hataWebsocketBaseUrl = "wss://my-api.hata.io/orderbook/ws"
 
 var Logger = logger.Get()
+var ScrapingLogger = logger.GetScrapingLogger()
 
 func CreateClient(id string, secret string) *HataExchange {
 	exchange := HataExchange{
@@ -56,6 +59,46 @@ func CreateClient(id string, secret string) *HataExchange {
 
 func (exchange *HataExchange) GetName() string {
 	return domain.Hata.String()
+}
+
+func (exchange *HataExchange) GetTransferFee(pair string, address string, amount float32) (fee float32, err error) {
+	Config := config.GetConfig()
+	withdrawFee := Config.Exchange[domain.Hata.String()].Crypto
+
+	if fee, exists := withdrawFee[pair]; exists {
+		return fee.WithdrawFee, nil
+	}
+
+	return -1, nil
+}
+
+func (exchange *HataExchange) GetWithdrawMin(pair string) (min float32, err error) {
+	Config := config.GetConfig()
+	withdrawFee := Config.Exchange[domain.Hata.String()].Crypto
+
+	if fee, exists := withdrawFee[pair]; exists {
+		return fee.WithdrawMinAmount, nil
+	}
+
+	return 0, nil
+}
+
+func (exchange *HataExchange) GetDepositMin(pair string) (min float32, err error) {
+	Config := config.GetConfig()
+	depositFee := Config.Exchange[domain.Hata.String()].Crypto
+
+	if fee, exists := depositFee[pair]; exists {
+		return fee.DepositMinAmount, nil
+	}
+
+	return 0, nil
+}
+
+func (exchange *HataExchange) GetDepositAddress(pair string) (address string, err error) {
+	Config := config.GetConfig()
+	depositAddress := Config.Exchange[domain.Hata.String()].Crypto[pair].Address
+
+	return depositAddress, nil
 }
 
 func (exchange *HataExchange) GetCurrentOrderBook(pair string) (output domain.OrderBook, err error) {
@@ -89,9 +132,9 @@ func (exchange *HataExchange) GetCurrentOrderBook(pair string) (output domain.Or
 	if err != nil {
 		Logger.Error("Error reading response body: " + err.Error())
 		return
+	} else {
+		ScrapingLogger.Info(string(respBody))
 	}
-
-	// Logger.Info("Hata response: " + string(respBody))
 
 	var respData HataOrderBookResponse
 	err = json.Unmarshal(respBody, &respData)
@@ -105,19 +148,24 @@ func (exchange *HataExchange) GetCurrentOrderBook(pair string) (output domain.Or
 
 	// Sort asks by price in ascending order (lowest first)
 	slices.SortFunc(asks, func(a, b HataOrderBookPriceFeed) int {
-		return int(a.Price) - int(b.Price)
+		return cmp.Compare(a.Price, b.Price)
 	})
 
 	// Sort bids by price in descending order (highest first)
 	slices.SortFunc(bids, func(a, b HataOrderBookPriceFeed) int {
-		return int(b.Price) - int(a.Price)
+		return cmp.Compare(b.Price, a.Price)
 	})
 
-	Logger.Info("Highest ask price: " + fmt.Sprintf("%v", asks[len(asks)-1])) //<-- highest ask price
-	Logger.Info("Lowest ask price: " + fmt.Sprintf("%v", asks[0]))            //<-- lowest ask price
-
-	Logger.Info("Lowest bid price: " + fmt.Sprintf("%v", bids[len(bids)-1])) //<-- lowest bid price
-	Logger.Info("Highest bid price: " + fmt.Sprintf("%v", bids[0]))          //<-- highest bid price
+	Logger.Info(fmt.Sprintf("[%s] Ask: [{%f %f}] [{%f %f}] => Bid: [{%f %f}] [{%f %f}]", pair,
+		asks[len(asks)-1].Price,
+		asks[len(asks)-1].Volume,
+		asks[0].Price,
+		asks[0].Volume,
+		bids[0].Price,
+		bids[0].Volume,
+		bids[len(bids)-1].Price,
+		bids[len(bids)-1].Volume,
+	))
 
 	output.Pair = pair
 	output.Exchange = domain.Hata
@@ -136,6 +184,16 @@ func (exchange *HataExchange) GetCurrentOrderBook(pair string) (output domain.Or
 			Volume: bid.Volume,
 		})
 	}
+
+	// Sort asks by price in ascending order (lowest first)
+	slices.SortFunc(output.Asks, func(a, b domain.PriceLevel) int {
+		return cmp.Compare(a.Price, b.Price)
+	})
+
+	// Sort bids by price in descending order (highest first)
+	slices.SortFunc(output.Bids, func(a, b domain.PriceLevel) int {
+		return cmp.Compare(b.Price, a.Price)
+	})
 
 	return output, nil
 }
