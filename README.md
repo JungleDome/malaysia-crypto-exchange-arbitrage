@@ -1,20 +1,18 @@
 # Malaysia Crypto Exchange Arbitrage
 
-Malaysia Crypto Exchange Arbitrage is a cutting-edge platform designed to identify and analyze arbitrage opportunities across multiple cryptocurrency exchanges in Malaysia. The project features a robust backend for data analysis and a modern frontend UI, but currently does not utilize its built-in API server architecture.
+Malaysia Crypto Exchange Arbitrage is a cutting-edge software designed to identify and analyze arbitrage opportunities across multiple cryptocurrency exchanges in Malaysia. The project features a robust backend for crypto price analysis.
+
+## Showcase
+![](showcase_1.png)
+
 
 ## Features
 
 - **Real-Time Arbitrage Detection**: Monitors multiple exchanges for price discrepancies.
-- **Modular Codebase**: Backend, frontend, and internal services are cleanly separated for future scalability.
-- **Database Integration**: Dockerized database setup for persistent storage.
-- **Live Reload**: Rapid development with live reload support.
-- **Comprehensive Testing**: Includes integration and unit tests for reliability.
 
 ## Tech Stack
 
 - **Backend**: Go (Golang)
-- **Frontend**: React + TypeScript (Vite)
-- **Database**: Docker
 - **Build Tools**: Makefile
 
 ## Note on Server Architecture
@@ -25,7 +23,6 @@ The codebase includes an API server architecture, but it is currently not used. 
 
 ### Prerequisites
 - [Go](https://golang.org/) (latest)
-- [Node.js](https://nodejs.org/) and npm
 - [Docker](https://www.docker.com/)
 - [Air](https://github.com/cosmtrek/air) (optional, for live reload)
 
@@ -34,12 +31,6 @@ The codebase includes an API server architecture, but it is currently not used. 
    ```bash
    git clone https://github.com/your-username/malaysia-crypto-exchange-arbitrage.git
    cd malaysia-crypto-exchange-arbitrage
-   ```
-2. Install frontend dependencies:
-   ```bash
-   cd frontend
-   npm install
-   cd ..
    ```
 
 ### Usage
@@ -54,29 +45,9 @@ make build
 make run
 ```
 
-#### Create and Run the Database Container
-```bash
-make docker-run
-```
-
-#### Shutdown the Database Container
-```bash
-make docker-down
-```
-
-#### Run Integration Tests
-```bash
-make itest
-```
-
 #### Live Reload for Development
 ```bash
 make watch
-```
-
-#### Run the Test Suite
-```bash
-make test
 ```
 
 #### Clean Up Build Artifacts
